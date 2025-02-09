@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Data</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA1MSrAuU8UdeHjnvxMrYDLz1qa1tBTPNU",
+            authDomain: "live-ef954.firebaseapp.com",
+            databaseURL: "https://live-ef954-default-rtdb.firebaseio.com",
+            projectId: "live-ef954",
+            storageBucket: "live-ef954.appspot.com",
+            messagingSenderId: "269509673905",
+            appId: "1:269509673905:web:7e0e5536744e3d312bf390",
+            measurementId: "G-CR04NRKFC8"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        const diseaseDatabase = {
+            "common_potato_diseases": [
+                { "condition": "temperature higher than 23", "disease": "Late Blight", "description": "Temperatures above 23°C combined with high humidity can lead to the spread of Late Blight, particularly under wet conditions." }
+            ]
+        };
+
+        let chart;
+
+        function formatToDDMMYYYY(date) {
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        function groupAndAverageData(chartData) {
+            const groupedData = {};
+            chartData.forEach(({ date, value }) => {
+                const formattedDate = formatToDDMMYYYY(date);
+                if (!groupedData[formattedDate]) {
+                    groupedData[formattedDate] = { total: 0, count: 0 };
+                }
+                groupedData[formattedDate].total += value;
+                groupedData[formattedDate].count += 1;
+            });
+
+            return Object.keys(groupedData).map((date) => ({
+                date,
+                average: groupedData[date].total / groupedData[date].count
+            }));
+        }
+
+        function fetchData() {
+            const dataRange = parseInt(document.getElementById('data-range-dropdown').value);
+            const chartData = [];
+            const dataRef = ref(database, "temperature");
+
+            onValue(dataRef, (snapshot) => {
+                snapshot.forEach((childSnapshot) => {
+                    const dataPoint = childSnapshot.val();
+                    const timestamp = dataPoint.timestamp;
+                    const reading = parseFloat(dataPoint.reading);
+
+                    const [time, date] = timestamp.split(" ");
+                    const [day, month, year] = date.split("/");
+                    const dateObject = new Date(`${year}-${month}-${day}T${time}`);
+
+                    chartData.push({ date: dateObject, value: reading });
+                });
+
+                const groupedData = groupAndAverageData(chartData);
+                const sortedData = groupedData.sort((a, b) => new Date(a.date) - new Date(b.date)).reverse();
+                const limitedData = sortedData.slice(-dataRange);
+                const labels = limitedData.map((item) => item.date);
+                const averages = limitedData.map((item) => item.average);
+
+                if (chart) chart.destroy();
+
+                chart = new Chart(document.getElementById('lineChart'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: averages,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            fill: false,
+                        }],
+                    },
+                    options: {
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { title: { display: true, text: 'Timestamp' } },
+                            y: {
+                                title: { display: true, text: 'Average Temperature (°C)' },
+                                min: 18,
+                                max: 28,
+                                ticks: { stepSize: 2 }
+                            }
+                        }
+                    }
+                });
+
+                analyzeData(limitedData);
+            });
+        }
+
+        function analyzeData(groupedData) {
+            const normalMin = 15, normalMax = 23;
+            let belowNormalDays = 0, aboveNormalDays = 0, totalNormalDays = 0;
+
+            groupedData.forEach(({ average }) => {
+                if (average < normalMin) belowNormalDays++;
+                else if (average > normalMax) aboveNormalDays++;
+                else totalNormalDays++;
+            });
+
+            document.getElementById('noticeText').innerText = `For ${totalNormalDays} days, temperature levels were normal.`;
+
+            const highTempDisease = diseaseDatabase.common_potato_diseases.find(d => d.condition === "temperature higher than 23");
+            document.getElementById('highTempWarning').innerHTML = aboveNormalDays > 0 ? 
+                `For ${aboveNormalDays} days, temperature was above 23°C.<br>The potato might experience ${highTempDisease.disease}: ${highTempDisease.description}` : "";
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('data-range-dropdown').addEventListener('change', fetchData);
+            fetchData();
+        });
+    </script>
+</head>
+</script>
+<style>
+    body {
+        font-family: Arial, Helvetica, sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 0;
+    }
+
+    #chartContainer {
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    canvas { max-width: 100%; height: auto; }
+
+    table {
+        border-collapse: collapse;
+        width: 80%;
+        max-width: 600px;
+        margin: 20px auto;
+        text-align: center;
+        border: 1px solid black;
+    }
+
+    th {
+        background-color: white;
+        font-weight: lighter;
+        padding: 10px;
+    }
+
+    td { border-top: 1px solid black; padding: 10px; }
+
+    .warning { color: red; font-weight: bold;}
+
+    .top-bar {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        padding: 0 10px;
+        box-sizing: border-box;
+        }
+
+        .top-bar button {
+        margin-right: 10px;
+        }
+</style>
+<body>
+    <div class="top-bar">
+        <a href="dashboard6.html">
+            <button>Go Back</button>
+        </a>
+        <select id="data-range-dropdown">
+            <option value="30">Last 30 Days</option>
+            <option value="60">Last 60 Days</option>
+            <option value="90">Last 90 Days</option>
+            <option value="120">Last 120 Days</option>
+        </select>
+    </div>
+    <h1>Temperature Data</h1>
+    <div id="chartContainer">
+        <canvas id="lineChart"></canvas>
+    </div>
+    <div id="analysisContainer">
+        <table>
+            <tr><td style="font-weight: bold;">NOTICE</td></tr>
+            <tr><th id="noticeText"></th></tr>
+            <tr><td class="warning">WARNING</td></tr>
+            <tr><th id="highTempWarning"></th></tr>
+        </table>
+    </div>
+</body>
+</html>
